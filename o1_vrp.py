@@ -2,6 +2,7 @@
 
 # Cannot find VRP online?
 # Bloomberg's historical volatility is different from what the paper proposes
+# Bloomberg provides VI but we already have the VIX data
 
 # In the orginal paper, sample ranges from Jan 1990 to December 2007
 
@@ -16,3 +17,18 @@
 # using 22 days of 78 within-day 5 minute squared returns. Thus n=22x78
 # For daily, we could use the same method but 
 # then a 5 minute sampling frequency might be too low
+
+import requests
+
+# Define the API endpoint
+url = 'https://api.tdameritrade.com/v1/marketdata/SPX/pricehistory'
+
+# Make a GET request
+response = requests.get(url)
+
+# Check if the request was successful
+if response.status_code == 200:
+    data = response.json()  # Convert the response to JSON
+    print(data)
+else:
+    print('Failed to retrieve data:', response.status_code)
