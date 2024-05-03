@@ -50,6 +50,29 @@ def filter_futures(contract, event_dt, period_range, frequency=None):
     return df
 
 
+def filter_event(contract, events):
+    """
+    Given a contract, return the date time of events that it experiences in the lifespan of the contract
+
+    Parameters
+    ----------
+    contract : str
+        [M][YY]
+        M = Contract month
+            F=Jan; G=Feb; H=Mar; J=Apr; K=May; M=Jun; N=Jul; Q=Aug; U=Sep; V=Oct; X=Nov; Z=Dec;
+        YY = Contract year
+    events : list like objected
+        An array containing dates of events 
+    """
+    contract_data = BASE_URL + "/VX" + contract + ".csv"
+    df = pd.read_csv(contract_data)
+    df["EndDt"] = pd.to_datetime(df["Date"] + " " + df["Time"], format="%m/%d/%Y %H:%M:%S.%f")
+    start_dt = df['Date'][0]
+    end_dt = df['Date'][-1]
+    mask = (events >= start_dt) & (events <= end_dt)
+    return events.loc[mask]
+
+
 def plt_event(contract, event_dt=None, period_range=None, frequency=None):
     """
     Given an indicated datetime of a macro event, a specified range of datetime interval, a specified contract, 
@@ -118,14 +141,13 @@ def plt_event_dist(contract, event_dt=None, period_range=None, frequency=None):
     
 
 
-
-
 # Example usage
 if __name__ == "__main__":
-    date = dt(2019, 9, 18, 14, 0, 0)
-    range_ = timedelta(days=0, hours=12, seconds=0)
-    frequency = 's'
-    plt_event_dist("Z19", event_dt=date, period_range=range_)
+    find_contracts(dt(2019, 9, 18, 14, 0, 0))
+    # date = dt(2019, 9, 18, 14, 0, 0)
+    # range_ = timedelta(days=0, hours=12, seconds=0)
+    # frequency = 's'
+    # plt_event_dist("Z19", event_dt=date, period_range=range_)
 
 
 
