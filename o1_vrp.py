@@ -21,7 +21,7 @@
 import requests
 
 # Define the API endpoint
-url = 'https://api.tdameritrade.com/v1/marketdata/SPX/pricehistory'
+request_url = f"https://localhost:5000/v1/api/iserver/marketdata/history?conid=265598&exchange=GLOBEX&period=1d&bar=1d&startTime=20230821-13:30:00&outsideRth=true"
 
 # Make a GET request
 response = requests.get(url)

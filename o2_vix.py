@@ -13,7 +13,7 @@ plt.style.use('ggplot')
 # print(os.getcwd())
 
 
-def filter_futures(contract, event_dt, period_range, frequency=None):
+def filter_futures_data(contract, event_dt, period_range, frequency=None):
     """
     Given an indicated datetime of a macro event, a specified look through range of datetime interval, and a specified contract
     Return all data of the specified contract that falls in the in the interval as a pandas dataframe
@@ -33,8 +33,8 @@ def filter_futures(contract, event_dt, period_range, frequency=None):
     period_range : datetime.timedelta
         An absolute time difference
     frequency: str
-        A string indicating the frequency at which we are sampling the data. If none, take the base 5 minutes frequency
-            Offical frequency alias https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#timeseries-offset-aliases
+        A string indicating the fixed frequency at which we are sampling the data. If none, take the base 5 minutes frequency
+            Offical frequency alias https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#dateoffset-objects
 
     """
     # Both "Date" and "Time" columns are strings
@@ -46,13 +46,16 @@ def filter_futures(contract, event_dt, period_range, frequency=None):
     mask = (df['EndDt'] >= start_dt) & (df['EndDt'] <= end_dt)
     df = df.loc[mask]
     if frequency:
+        # TODO: dt.floor() only rounds for fixed frequency
         df = df[df['EndDt'] == df['EndDt'].dt.floor(frequency)]
+        
     return df
 
 
-def filter_event(contract, events):
+def filter_events(contract, events):
     """
-    Given a contract, return the date time of events that it experiences in the lifespan of the contract
+    Given a contract, and a list of events(timestamp) 
+    Return a sub-list of events(timestamps) that occurs in the lifespan of the contract
 
     Parameters
     ----------
@@ -61,19 +64,57 @@ def filter_event(contract, events):
         M = Contract month
             F=Jan; G=Feb; H=Mar; J=Apr; K=May; M=Jun; N=Jul; Q=Aug; U=Sep; V=Oct; X=Nov; Z=Dec;
         YY = Contract year
-    events : list like objected
+    events : list like objects containing datetime objects
         An array containing dates of events 
     """
     contract_data = BASE_URL + "/VX" + contract + ".csv"
     df = pd.read_csv(contract_data)
     df["EndDt"] = pd.to_datetime(df["Date"] + " " + df["Time"], format="%m/%d/%Y %H:%M:%S.%f")
-    start_dt = df['Date'][0]
-    end_dt = df['Date'][-1]
+    start_dt = df['EndDt'].iloc[0]
+    end_dt = df['EndDt'].iloc[-1]
     mask = (events >= start_dt) & (events <= end_dt)
     return events.loc[mask]
 
 
-def plt_event(contract, event_dt=None, period_range=None, frequency=None):
+def plt_contract(contract, events, frequency=None):
+    """
+    Given a contract and a frequency, plot the contract's full time series of its' mid-point of bid-ask,
+    marking the timestamps of when events occurs.
+
+    Parameters
+    ----------
+    contract : str 
+        [M][YY]
+        M = Contract month
+            F=Jan; G=Feb; H=Mar; J=Apr; K=May; M=Jun; N=Jul; Q=Aug; U=Sep; V=Oct; X=Nov; Z=Dec;
+        YY = Contract year
+    """
+    contract_data = BASE_URL + "/VX" + contract + ".csv"
+    df = pd.read_csv(contract_data)
+    df["EndDt"] = pd.to_datetime(df["Date"] + " " + df["Time"], format="%m/%d/%Y %H:%M:%S.%f")
+    if frequency:
+        # TODO: dt.floor() only rounds for fixed frequency
+        df = df[df['EndDt'] == df['EndDt'].dt.floor(frequency)]
+    filt_events = filter_events(contract, events)
+
+    fig, ax = plt.subplots(figsize=(12,8))
+    handles, labels = ax.get_legend_handles_labels()
+
+    midp = 0.5*(df['Close Bid Price'] + df['Close Ask Price'])
+    ax.plot(df['EndDt'], midp, color='b')
+    ax.set_title(f'VX{contract}', fontsize=12, fontweight='bold')
+    ax.set_xlabel('Timestamp', fontsize=12)
+    ax.set_ylabel(f'Mid-point of bid-ask price of VX{contract}', fontsize=12)
+    for event_dt in filt_events:
+        event_line = ax.axvline(x=event_dt, color='red', linestyle='--', label=f'{event_dt} FOMC')
+        handles.append(event_line)
+        labels.append(f'FOMC {event_dt}')
+    ax.legend(handles, labels)
+
+    plt.show()
+
+
+def plt_contract_event(contract, event_dt=None, period_range=None, frequency=None):
     """
     Given an indicated datetime of a macro event, a specified range of datetime interval, a specified contract, 
     and a frequency of contract data
@@ -90,19 +131,19 @@ def plt_event(contract, event_dt=None, period_range=None, frequency=None):
     period_range : datetime.timedelta
     frequency: str
     """
-    raw_df = filter_futures(contract, event_dt=event_dt, period_range=period_range, frequency=frequency)
+    raw_df = filter_futures_data(contract, event_dt=event_dt, period_range=period_range, frequency=frequency)
     
-    fig, ax = plt.subplots(figsize=(10,6))
+    fig, ax = plt.subplots(figsize=(12,8))
     handles, labels = ax.get_legend_handles_labels()
 
     midp = 0.5*(raw_df['Close Bid Price'] + raw_df['Close Ask Price'])
     ax.plot(raw_df['EndDt'], midp, color='b')
     ax.set_title(f'VX{contract}', fontsize=12, fontweight='bold')
-    ax.set_xlabel('Date Time', fontsize=12)
-    ax.set_ylabel(f'Mid point of bid and ask price of VX{contract}', fontsize=12)
-    event_line = ax.axvline(x=event_dt, color='red', linestyle='--', label='FOMC Announcment')
+    ax.set_xlabel('Timestamp ', fontsize=12)
+    ax.set_ylabel(f'Mid-point of bid-ask price of VX{contract}', fontsize=12)
+    event_line = ax.axvline(x=event_dt, color='red', linestyle='--', label=f'{event_dt} FOMC')
     handles.append(event_line)
-    labels.append('FOMC Announcment')
+    labels.append(f'{event_dt} FOMC')
     ax.legend(handles, labels)
     plt.show()
 
@@ -124,16 +165,19 @@ def plt_event_dist(contract, event_dt=None, period_range=None, frequency=None):
     period_range : datetime.timedelta
     frequency: str
     """
-    raw_df = filter_futures(contract, event_dt=event_dt, period_range=period_range, frequency=frequency)
+    raw_df = filter_futures_data(contract, event_dt=event_dt, period_range=period_range, frequency=frequency)
     raw_df['MidPt'] = 0.5*(raw_df['Close Bid Price'] + raw_df['Close Ask Price'])
 
     bef_df = raw_df[raw_df['EndDt'] < event_dt]
     aft_df = raw_df[raw_df['EndDt'] > event_dt]
     
-    fig, axes = plt.subplots(nrows=2, ncols=1, sharex=True, figsize=(10,6))
+    fig, axes = plt.subplots(nrows=2, ncols=1, sharex=True, figsize=(12,8))
     
-    for ax, column, color in zip(axes.ravel(), [bef_df['MidPt'], aft_df['MidPt']], ['teal', 'orange']):
-        ax.hist(column, color=color)
+    for ax, column, color, title in zip(axes.ravel(), [bef_df['MidPt'], aft_df['MidPt']], ['teal', 'orange'], ['Before', 'After']):
+        ax.hist(column, color=color,)
+        ax.set_title(title + ' ' + f'FOMC {event_dt}')
+        ax.set_ylabel('Count')
+        ax.set_xlabel('Mid-point of bid-ask')
         ax.axvline(x=np.mean(column), color='red', linestyle='--', label='Mean')
         ax.legend()
         
@@ -143,12 +187,11 @@ def plt_event_dist(contract, event_dt=None, period_range=None, frequency=None):
 
 # Example usage
 if __name__ == "__main__":
-    find_contracts(dt(2019, 9, 18, 14, 0, 0))
-    # date = dt(2019, 9, 18, 14, 0, 0)
-    # range_ = timedelta(days=0, hours=12, seconds=0)
-    # frequency = 's'
-    # plt_event_dist("Z19", event_dt=date, period_range=range_)
-
+    date = dt(2012, 10, 24, 14, 0, 0)
+    # range_ = timedelta(days=30, hours=0, seconds=0)
+    # frequency = 'D'
+    # filter_futures_data("F13", event_dt=date, period_range=range_, frequency=frequency)
+    
 
 
 
