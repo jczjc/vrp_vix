@@ -4,6 +4,7 @@ import os
 import pandas as pd 
 import numpy as np
 import matplotlib.pyplot as plt
+import statsmodels.regression as lm
 from datetime import timedelta, datetime as dt
 
 BASE_URL = "Data/vix_futures/data/vix_futures/Tickdata_VX_Quote"
@@ -182,16 +183,51 @@ def plt_event_dist(contract, event_dt=None, period_range=None, frequency=None):
         ax.legend()
         
     plt.show()
+
+
+# TODO: Construct VIX Premiums using VIX futures prices and VIX Tick data
+def get_vix_premium(t):
+    """
+    Given a specified timestamp t, return the rolling 1 month VIX premium at time t as termed in Prof Cheng's paper.
+
+    Implementation: 
+
+    As stated the in the paper, assuming no arbitrage, the risk neutral expecation of VIX at time t is
+    estimated with the price of the one month ahead expiration future . The physical expectation is estimated 
+    with an ARMA(2,2) model on the VIX time series using data from pre-2004.
+
+    We then take their differences adjusted by the number of trading days (minus expiration day) to get a daily 
+    rolling 1 month VIX premium
+
+    The paper sugguests that using a rolling ARMA forecast model that uses information available up to but 
+    excluding date t should improve forecast estimates
+
+    Adjustments to the implementation:
+    - Calculate the 1 month VIX premium at a shorter frequency (If there are data on shorter frequency expiration 
+    contracts, then a shorter VIX premium could be calculated at a desired frequency)
+
+    Parameters:
+    ----------
+    t: datetime
+        timestamp to calculate the VIX premium
+    F=Jan; G=Feb; H=Mar; J=Apr; K=May; M=Jun; N=Jul; Q=Aug; U=Sep; V=Oct; X=Nov; Z=Dec;
+    """
+    m_mapping = {1:'F', 2:'G', 3:'H', 4:'J', 5:'K', 6:'M', 7:'N', 8:'Q', 9:'U', 10:'V', 11:'X', 12:'Z'}
+    contract_m = m_mapping[t.month + 1]
+    contract_y = str(t.year)[-2:]
+
+
     
 
 
 # Example usage
 if __name__ == "__main__":
-    date = dt(2012, 10, 24, 14, 0, 0)
+    date = dt(2016, 10, 24, 14, 0, 0)
+    print(date.month)
     # range_ = timedelta(days=30, hours=0, seconds=0)
     # frequency = 'D'
     # filter_futures_data("F13", event_dt=date, period_range=range_, frequency=frequency)
-    
+    print(str(2016)[-2:])
 
 
 
