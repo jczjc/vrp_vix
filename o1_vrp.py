@@ -1,4 +1,4 @@
-# How to Can we compute a VRP at the daily frequency? 
+#Can we compute a VRP at the daily frequency? 
 
 # Cannot find VRP online?
 # Bloomberg's historical volatility is different from what the paper proposes
@@ -17,6 +17,11 @@
 # using 22 days of 78 within-day 5 minute squared returns. Thus n=22x78
 # For daily, we could use the same method but 
 # then a 5 minute sampling frequency might be too low
+# Interactive brokers API for minute frequency data
+
+# VIX is 30 day look forward vol, to calculate 1 day VRP we need 1 day look forward VIX. CBOE 
+# provides data for 1 day VIX starting only from 2022 
+
 
 import requests
 

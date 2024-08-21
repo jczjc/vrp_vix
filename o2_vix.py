@@ -1,5 +1,3 @@
-# How does Vix Futures and VIX premiums behave around macro announcements(FOMC) at the daily and intra-day frequency?
-# Eg: Intra day Vix Futures behaviour around FOMC announcement time 
 import os
 import pandas as pd 
 import numpy as np
@@ -7,11 +5,22 @@ import matplotlib.pyplot as plt
 import statsmodels.regression as lm
 from datetime import timedelta, datetime as dt
 
-BASE_URL = "Data/vix_futures/data/vix_futures/Tickdata_VX_Quote"
 plt.style.use('ggplot')
 
+BASE_URL_FUT = "Data/vix_futures/data/vix_futures/Tickdata_VX_Quote/"
+BASE_URL_IND = "Data/vix_futures/data/vix_futures/IAP/IAP.csv"
+BASE_URL_IND_FUT = "Data/vix_futures/S&P 500 VIX Futures Historical Data.csv"
+FUT_MAP = {1:'F', 2:'G', 3:'H', 4:'J', 5:'K', 6:'M', 7:'N', 8:'Q', 9:'U', 10:'V', 11:'X', 12:'Z'}
 
-# print(os.getcwd())
+# Data description:
+
+# For VIX Index, the data source is IAP.csv is a time series of VIX in CDT at 15 seconds intervals.
+# VIX index disseminated from 2:15am CDT to 3:15pm CDT with a 15min break between 8:15am to 8:30am
+
+# For VIX Futures the data is in ET. 
+
+# For S&P 500 VIX Futures Historical Data.csv, each entry shows the prices of the VIX Future expiring 
+# that month of the entry date
 
 
 def filter_futures_data(contract, event_dt, period_range, frequency=None):
@@ -39,7 +48,7 @@ def filter_futures_data(contract, event_dt, period_range, frequency=None):
 
     """
     # Both "Date" and "Time" columns are strings
-    contract_data = BASE_URL + "/VX" + contract + ".csv"
+    contract_data = BASE_URL_FUT + "/VX" + contract + ".csv"
     df = pd.read_csv(contract_data)
     start_dt = event_dt - period_range
     end_dt = event_dt + period_range
@@ -68,7 +77,7 @@ def filter_events(contract, events):
     events : list like objects containing datetime objects
         An array containing dates of events 
     """
-    contract_data = BASE_URL + "/VX" + contract + ".csv"
+    contract_data = BASE_URL_FUT + "/VX" + contract + ".csv"
     df = pd.read_csv(contract_data)
     df["EndDt"] = pd.to_datetime(df["Date"] + " " + df["Time"], format="%m/%d/%Y %H:%M:%S.%f")
     start_dt = df['EndDt'].iloc[0]
@@ -90,7 +99,7 @@ def plt_contract(contract, events, frequency=None):
             F=Jan; G=Feb; H=Mar; J=Apr; K=May; M=Jun; N=Jul; Q=Aug; U=Sep; V=Oct; X=Nov; Z=Dec;
         YY = Contract year
     """
-    contract_data = BASE_URL + "/VX" + contract + ".csv"
+    contract_data = BASE_URL_FUT + "/VX" + contract + ".csv"
     df = pd.read_csv(contract_data)
     df["EndDt"] = pd.to_datetime(df["Date"] + " " + df["Time"], format="%m/%d/%Y %H:%M:%S.%f")
     if frequency:
@@ -212,22 +221,111 @@ def get_vix_premium(t):
         timestamp to calculate the VIX premium
     F=Jan; G=Feb; H=Mar; J=Apr; K=May; M=Jun; N=Jul; Q=Aug; U=Sep; V=Oct; X=Nov; Z=Dec;
     """
-    m_mapping = {1:'F', 2:'G', 3:'H', 4:'J', 5:'K', 6:'M', 7:'N', 8:'Q', 9:'U', 10:'V', 11:'X', 12:'Z'}
-    contract_m = m_mapping[t.month + 1]
+    contract_m = FUT_MAP[t.month + 1]
     contract_y = str(t.year)[-2:]
+    contract_data = BASE_URL_FUT + "/VX" + contract_m + contract_y + ".csv"
+    contract_df = pd.read_csv(contract_data)
+    contract_df["EndDt"] = contract_df.to_datetime(contract_df["Date"] + " " + contract_df["Time"], format="%m/%d/%Y %H:%M:%S.%f")
+    pass
+
+# TODO: 
+#       Compare VIX Index, VIX chained futures prices at a daily frequency 10 days out and 10 days after FOMC annoucments.
+
+#       Graphical: Plot both series with respect to the FOMC annoucments, including the lookthrough period range
+#                  Plot the daily changes with respect to the FOMC annoncments
+
+#       Numeric: For each t=-10, -9, ..., 0, 1, 2, ..., 10, calculate the mean change in daily changes
 
 
+def get_rolling_contract(event_dt, roll=1):
+    """
+    Return the dataframe of the rolling contract defined by the event_dt and roll.
+
+    Parameters
+    ----------
+    event_dt : datetime.datetime or list of datetime.datetime
+        The datetime of events
+    roll : int
+        The number of forward rolling month
+    """
+    month = event_dt.month 
+    year = event_dt.year
+    if month == 12: # special case for December
+        month = 1
+        year += 1 
+    else: 
+        month += 1
+    month_str = FUT_MAP[month]
+    year_str = str(year)[-2:]
+    url = BASE_URL_FUT + "VX" + month_str + year_str + ".csv"
+    return pd.read_csv(url)
     
+print(get_rolling_contract(dt(2014, 12, 13)))
+
+def get_range_d(df, event_dt, range_width):
+    """
+    Return a multi-indexed dataframe containing entries satisfying the number given by 
+    the range_width with respect to event_dt
+
+    Parameters
+    ----------
+    df: DataFrame
+        The dataframe to filter
+    event_dt : datetime.datetime or list of datetime.datetime
+        The datetime of events
+    range_width : int
+        Number of entries to add before and after event_dt
+    """
+    if type(event_dt) is list:
+        result = pd.DataFrame()
+        for date in event_dt: 
+            if date not in df.index: # if an event datetime is not the dataframe
+                continue 
+            event_row = df.index.get_loc(date)
+            start = event_row - range_width
+            end = event_row + range_width 
+            filt = df.iloc[start:end + 1, :].reset_index()
+            filt['Event Date'] = date
+            filt['Date Label'] = [-i for i in range(range_width, 0, -1)] + [0] + \
+                                 [i for i in range(1, range_width+1)]
+            filt = filt.set_index(['Event Date', 'Date'])
+            result = pd.concat([result, filt])
+    else:
+        event_row = df.index.get_loc(event_dt)
+        start = event_row - range_width
+        end = event_row + range_width 
+        result = df.iloc[start:end + 1, :].reset_index()
+        result['Event Date'] = event_dt
+        result['Date Label'] = [-i for i in range(range_width, 0, -1)] + [0] + \
+                                [i for i in range(1, range_width+1)]
+        result = result.set_index(['Event Date', 'Date'])
+    return result
 
 
-# Example usage
-if __name__ == "__main__":
-    date = dt(2016, 10, 24, 14, 0, 0)
-    print(date.month)
-    # range_ = timedelta(days=30, hours=0, seconds=0)
-    # frequency = 'D'
-    # filter_futures_data("F13", event_dt=date, period_range=range_, frequency=frequency)
-    print(str(2016)[-2:])
+
+
+def plot_ts_vix_vixfut(df_1, df_2, events, q):
+    """
+    Plot the timeseries of quantity q of vix and vix futures, marking the days of the events
+    """
+    fig, ax = plt.subplots(figsize=(14,10))
+    handles, labels = ax.get_legend_handles_labels()
+    ax.plot(df_1['Date'], df_1[q],color='b', label='VIX')
+    ax.plot(df_2['Date'], df_2[q],color='g', label='VIX Futures')
+    ax.set_xlabel('Timestamp', fontsize=12)
+    
+    for event_dt in events:
+        event_line = ax.axvline(x=event_dt, color='red', linestyle='--', label=f'{event_dt} FOMC')
+        handles.append(event_line)
+        labels.append(f'FOMC {event_dt}')
+
+    ax.legend(handles, labels)
+    plt.show()
+
+
+
+
+
 
 
 
