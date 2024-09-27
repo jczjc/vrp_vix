@@ -1,200 +1,31 @@
-import os
 import pandas as pd 
-import numpy as np
+import pyfedwatch as fw
+import scipy
 import matplotlib.pyplot as plt
-import statsmodels.regression as lm
-from datetime import timedelta, datetime as dt
+from pyfedwatch.datareader import read_price_history
+from pyfedwatch.datareader import get_fomc_data
 
-plt.style.use('ggplot')
-
-BASE_URL_FUT = "Data/vix_futures/data/vix_futures/Tickdata_VX_Quote/"
-BASE_URL_IND = "Data/vix_futures/data/vix_futures/IAP/IAP.csv"
-BASE_URL_IND_FUT = "Data/vix_futures/S&P 500 VIX Futures Historical Data.csv"
-FUT_MAP = {1:'F', 2:'G', 3:'H', 4:'J', 5:'K', 6:'M', 7:'N', 8:'Q', 9:'U', 10:'V', 11:'X', 12:'Z'}
 
 # Data description:
 
 # For VIX Index, the data source is IAP.csv is a time series of VIX in CDT at 15 seconds intervals.
 # VIX index disseminated from 2:15am CDT to 3:15pm CDT with a 15min break between 8:15am to 8:30am
 
-# For VIX Futures the data is in ET. 
+# For VIX Futures contract files the data is in ET. 
 
 # For S&P 500 VIX Futures Historical Data.csv, each entry shows the prices of the VIX Future expiring 
 # that month of the entry date
 
-
-def filter_futures_data(contract, event_dt, period_range, frequency=None):
-    """
-    Given an indicated datetime of a macro event, a specified look through range of datetime interval, and a specified contract
-    Return all data of the specified contract that falls in the in the interval as a pandas dataframe
-
-    If the speicified contract does not contain any data that falls in the specified datetime of the macro event and the 
-    specified looking range period, return an empty dataframe
-
-    Parameters
-    ----------
-    contract : str 
-        [M][YY]
-        M = Contract month
-            F=Jan; G=Feb; H=Mar; J=Apr; K=May; M=Jun; N=Jul; Q=Aug; U=Sep; V=Oct; X=Nov; Z=Dec;
-        YY = Contract year
-    event_dt : datetime.datetime
-        The datetime of event
-    period_range : datetime.timedelta
-        An absolute time difference
-    frequency: str
-        A string indicating the fixed frequency at which we are sampling the data. If none, take the base 5 minutes frequency
-            Offical frequency alias https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#dateoffset-objects
-
-    """
-    # Both "Date" and "Time" columns are strings
-    contract_data = BASE_URL_FUT + "/VX" + contract + ".csv"
-    df = pd.read_csv(contract_data)
-    start_dt = event_dt - period_range
-    end_dt = event_dt + period_range
-    df["EndDt"] = pd.to_datetime(df["Date"] + " " + df["Time"], format="%m/%d/%Y %H:%M:%S.%f")
-    mask = (df['EndDt'] >= start_dt) & (df['EndDt'] <= end_dt)
-    df = df.loc[mask]
-    if frequency:
-        # TODO: dt.floor() only rounds for fixed frequency
-        df = df[df['EndDt'] == df['EndDt'].dt.floor(frequency)]
-        
-    return df
+BASE_URL_FUT = "Data/vix_futures/data/vix_futures/Tickdata_VX_Quote/"
+BASE_URL_IND = "Data/vix_futures/data/vix_futures/IAP/IAP.csv"
+BASE_URL_IND_FUT = "Data/vix_futures/S&P 500 VIX Futures Historical Data.csv"
+BASE_URL_DATES = "Data/macro/data/macro/macro_announcement_dates_202112.csv"
+BASE_URL_FEDFUT = 'Data/ff_futures/contracts'
+FOMC_DATA = get_fomc_data()
+FOMC_DATES = FOMC_DATA[(FOMC_DATA['Status'] == 'Scheduled') | (FOMC_DATA['Status'] == 'Cancelled')].index.tolist()
+FUT_MAP = {1:'F', 2:'G', 3:'H', 4:'J', 5:'K', 6:'M', 7:'N', 8:'Q', 9:'U', 10:'V', 11:'X', 12:'Z'}
 
 
-def filter_events(contract, events):
-    """
-    Given a contract, and a list of events(timestamp) 
-    Return a sub-list of events(timestamps) that occurs in the lifespan of the contract
-
-    Parameters
-    ----------
-    contract : str
-        [M][YY]
-        M = Contract month
-            F=Jan; G=Feb; H=Mar; J=Apr; K=May; M=Jun; N=Jul; Q=Aug; U=Sep; V=Oct; X=Nov; Z=Dec;
-        YY = Contract year
-    events : list like objects containing datetime objects
-        An array containing dates of events 
-    """
-    contract_data = BASE_URL_FUT + "/VX" + contract + ".csv"
-    df = pd.read_csv(contract_data)
-    df["EndDt"] = pd.to_datetime(df["Date"] + " " + df["Time"], format="%m/%d/%Y %H:%M:%S.%f")
-    start_dt = df['EndDt'].iloc[0]
-    end_dt = df['EndDt'].iloc[-1]
-    mask = (events >= start_dt) & (events <= end_dt)
-    return events.loc[mask]
-
-
-def plt_contract(contract, events, frequency=None):
-    """
-    Given a contract and a frequency, plot the contract's full time series of its' mid-point of bid-ask,
-    marking the timestamps of when events occurs.
-
-    Parameters
-    ----------
-    contract : str 
-        [M][YY]
-        M = Contract month
-            F=Jan; G=Feb; H=Mar; J=Apr; K=May; M=Jun; N=Jul; Q=Aug; U=Sep; V=Oct; X=Nov; Z=Dec;
-        YY = Contract year
-    """
-    contract_data = BASE_URL_FUT + "/VX" + contract + ".csv"
-    df = pd.read_csv(contract_data)
-    df["EndDt"] = pd.to_datetime(df["Date"] + " " + df["Time"], format="%m/%d/%Y %H:%M:%S.%f")
-    if frequency:
-        # TODO: dt.floor() only rounds for fixed frequency
-        df = df[df['EndDt'] == df['EndDt'].dt.floor(frequency)]
-    filt_events = filter_events(contract, events)
-
-    fig, ax = plt.subplots(figsize=(12,8))
-    handles, labels = ax.get_legend_handles_labels()
-
-    midp = 0.5*(df['Close Bid Price'] + df['Close Ask Price'])
-    ax.plot(df['EndDt'], midp, color='b')
-    ax.set_title(f'VX{contract}', fontsize=12, fontweight='bold')
-    ax.set_xlabel('Timestamp', fontsize=12)
-    ax.set_ylabel(f'Mid-point of bid-ask price of VX{contract}', fontsize=12)
-    for event_dt in filt_events:
-        event_line = ax.axvline(x=event_dt, color='red', linestyle='--', label=f'{event_dt} FOMC')
-        handles.append(event_line)
-        labels.append(f'FOMC {event_dt}')
-    ax.legend(handles, labels)
-
-    plt.show()
-
-
-def plt_contract_event(contract, event_dt=None, period_range=None, frequency=None):
-    """
-    Given an indicated datetime of a macro event, a specified range of datetime interval, a specified contract, 
-    and a frequency of contract data
-    Plot the specified contract data that falls in the in the interval at the specified frequency
-
-    Parameters
-    ----------
-    contract : str 
-        [M][YY]
-        M = Contract month
-            F=Jan; G=Feb; H=Mar; J=Apr; K=May; M=Jun; N=Jul; Q=Aug; U=Sep; V=Oct; X=Nov; Z=Dec;
-        YY = Contract year
-    event_dt : datetime.datetime
-    period_range : datetime.timedelta
-    frequency: str
-    """
-    raw_df = filter_futures_data(contract, event_dt=event_dt, period_range=period_range, frequency=frequency)
-    
-    fig, ax = plt.subplots(figsize=(12,8))
-    handles, labels = ax.get_legend_handles_labels()
-
-    midp = 0.5*(raw_df['Close Bid Price'] + raw_df['Close Ask Price'])
-    ax.plot(raw_df['EndDt'], midp, color='b')
-    ax.set_title(f'VX{contract}', fontsize=12, fontweight='bold')
-    ax.set_xlabel('Timestamp ', fontsize=12)
-    ax.set_ylabel(f'Mid-point of bid-ask price of VX{contract}', fontsize=12)
-    event_line = ax.axvline(x=event_dt, color='red', linestyle='--', label=f'{event_dt} FOMC')
-    handles.append(event_line)
-    labels.append(f'{event_dt} FOMC')
-    ax.legend(handles, labels)
-    plt.show()
-
-
-def plt_event_dist(contract, event_dt=None, period_range=None, frequency=None):
-    """
-    Given an indicated datetime of a macro event, a specified range of datetime interval, a specified contract, 
-    and a frequency of contract data
-    Plot the distribution of the specified contract data before and after the event dt
-
-    Parameters
-    ----------
-    contract : str 
-        [M][YY]
-        M = Contract month
-            F=Jan; G=Feb; H=Mar; J=Apr; K=May; M=Jun; N=Jul; Q=Aug; U=Sep; V=Oct; X=Nov; Z=Dec;
-        YY = Contract year
-    event_dt : datetime.datetime
-    period_range : datetime.timedelta
-    frequency: str
-    """
-    raw_df = filter_futures_data(contract, event_dt=event_dt, period_range=period_range, frequency=frequency)
-    raw_df['MidPt'] = 0.5*(raw_df['Close Bid Price'] + raw_df['Close Ask Price'])
-
-    bef_df = raw_df[raw_df['EndDt'] < event_dt]
-    aft_df = raw_df[raw_df['EndDt'] > event_dt]
-    
-    fig, axes = plt.subplots(nrows=2, ncols=1, sharex=True, figsize=(12,8))
-    
-    for ax, column, color, title in zip(axes.ravel(), [bef_df['MidPt'], aft_df['MidPt']], ['teal', 'orange'], ['Before', 'After']):
-        ax.hist(column, color=color,)
-        ax.set_title(title + ' ' + f'FOMC {event_dt}')
-        ax.set_ylabel('Count')
-        ax.set_xlabel('Mid-point of bid-ask')
-        ax.axvline(x=np.mean(column), color='red', linestyle='--', label='Mean')
-        ax.legend()
-        
-    plt.show()
-
-
-# TODO: Construct VIX Premiums using VIX futures prices and VIX Tick data
 def get_vix_premium(t):
     """
     Given a specified timestamp t, return the rolling 1 month VIX premium at time t as termed in Prof Cheng's paper.
@@ -228,18 +59,10 @@ def get_vix_premium(t):
     contract_df["EndDt"] = contract_df.to_datetime(contract_df["Date"] + " " + contract_df["Time"], format="%m/%d/%Y %H:%M:%S.%f")
     pass
 
-# TODO: 
-#       Compare VIX Index, VIX chained futures prices at a daily frequency 10 days out and 10 days after FOMC annoucments.
 
-#       Graphical: Plot both series with respect to the FOMC annoucments, including the lookthrough period range
-#                  Plot the daily changes with respect to the FOMC annoncments
-
-#       Numeric: For each t=-10, -9, ..., 0, 1, 2, ..., 10, calculate the mean change in daily changes
-
-
-def get_rolling_contract(event_dt, roll=1):
+def forward_roll_contract(event_dt, roll=1):
     """
-    Return the dataframe of the rolling contract defined by the event_dt and roll.
+    Return data of forward rolling expiration contract defined by the event_dt and roll.
 
     Parameters
     ----------
@@ -250,83 +73,155 @@ def get_rolling_contract(event_dt, roll=1):
     """
     month = event_dt.month 
     year = event_dt.year
-    if month == 12: # special case for December
-        month = 1
+    if (month + roll) > 12 : # Roll to next year
+        month = (month + roll) % 12
         year += 1 
     else: 
-        month += 1
+        month += roll
     month_str = FUT_MAP[month]
     year_str = str(year)[-2:]
     url = BASE_URL_FUT + "VX" + month_str + year_str + ".csv"
     return pd.read_csv(url)
-    
-print(get_rolling_contract(dt(2014, 12, 13)))
 
-def get_range_d(df, event_dt, range_width):
+
+def get_range_multi(event_dt, roll, range_width, freq):
     """
-    Return a multi-indexed dataframe containing entries satisfying the number given by 
-    the range_width with respect to event_dt
+    Return a multi-indexed dataframe containing data of forward roll contract of event_dt, filtered as
+    given by the range_width and freq 
+
+    Parameters
+    ----------
+    event_dt : list of datetime.datetime
+        The datetime of events
+    range_width : int
+        Number of entries to add before and after event_dt
+    freq : str
+        The frequency to adjust the dataframe
+    """
+    result = pd.DataFrame()
+    for dt in event_dt: 
+        try: # if a contract for the date cannot be found
+            df = forward_roll_contract(dt, roll)
+        except Exception:
+            continue 
+        df["Datetime"] = pd.to_datetime(df["Date"] + " " + df["Time"], format="%m/%d/%Y %H:%M:%S.%f")
+        df = df.set_index('Datetime')
+        df = df.resample(freq).first() 
+        df.dropna(inplace=True)
+        try: # If the rolling contract does not contain data for this event datetime. Eg: 2012/06/20
+            event_row = df.index.get_loc(dt)
+        except Exception:
+            continue
+        start = event_row - range_width - 1 
+        end = event_row + range_width 
+        filt = df.iloc[start:end + 1, :].reset_index()
+        filt['Event Datetime'] = dt
+        filt['Datetime Label'] = [-i for i in range(range_width + 1, 0, -1)] + [0] + \
+                                [i for i in range(1, range_width+1)]
+        filt = filt.set_index(['Event Datetime', 'Datetime'])
+        result = pd.concat([result, filt])
+    return result
+
+
+def get_range(df, event_dt, bef, aft, freq=None):
+    """
+    Return a multi-indexed dataframe from df containing entries satisfying the number given by 
+    the range_width with respect to event_dt and freq
 
     Parameters
     ----------
     df: DataFrame
         The dataframe to filter
-    event_dt : datetime.datetime or list of datetime.datetime
+    event_dt : list of datetime.datetime
         The datetime of events
     range_width : int
         Number of entries to add before and after event_dt
+    freq : str
+        The frequency to adjust the dataframe,
     """
-    if type(event_dt) is list:
-        result = pd.DataFrame()
-        for date in event_dt: 
-            if date not in df.index: # if an event datetime is not the dataframe
-                continue 
-            event_row = df.index.get_loc(date)
-            start = event_row - range_width
-            end = event_row + range_width 
-            filt = df.iloc[start:end + 1, :].reset_index()
-            filt['Event Date'] = date
-            filt['Date Label'] = [-i for i in range(range_width, 0, -1)] + [0] + \
-                                 [i for i in range(1, range_width+1)]
-            filt = filt.set_index(['Event Date', 'Date'])
-            result = pd.concat([result, filt])
-    else:
-        event_row = df.index.get_loc(event_dt)
-        start = event_row - range_width
-        end = event_row + range_width 
-        result = df.iloc[start:end + 1, :].reset_index()
-        result['Event Date'] = event_dt
-        result['Date Label'] = [-i for i in range(range_width, 0, -1)] + [0] + \
-                                [i for i in range(1, range_width+1)]
-        result = result.set_index(['Event Date', 'Date'])
+    df = df.resample(freq).first()
+    df = df.dropna()
+    result = pd.DataFrame()
+    for date in event_dt: 
+        if date not in df.index: # if an event datetime is not the dataframe
+            continue 
+        event_row = df.index.get_loc(date)
+        start = event_row - bef - 1
+        end = event_row + aft 
+        filt = df.iloc[start:end + 1, :].reset_index()
+        # The look through period might not contain as much data as we want
+        if filt.shape[0] == 0:
+            continue
+        filt.set_index('Datetime', inplace=True)
+        event_row_filt = filt.index.get_loc(date)
+        bef_filt = event_row_filt - 1
+        aft_filt = filt.shape[0] - event_row_filt
+        filt.reset_index(inplace=True)
+        filt['Event Datetime'] = date
+        filt['Datetime Label'] = [-i for i in range(bef_filt + 1, 0, -1)] + [0] + \
+                                [i for i in range(1, aft_filt)]
+        filt = filt.set_index(['Event Datetime', 'Datetime'])
+        result = pd.concat([result, filt])
     return result
 
 
-
-
-def plot_ts_vix_vixfut(df_1, df_2, events, q):
+def get_cross_sec_avg(df, price=False, pct_change=True, plot=True, t_test=True, freq='d'):
     """
-    Plot the timeseries of quantity q of vix and vix futures, marking the days of the events
+    Return a dataframe containing the cross sectional average for each of the intervals,
+    Parameters
+    ----------
+    df: DataFrame
+        The dataframe of 
+    price : Bool
+        If True, calculate a price column
+    pct_change : Bool
+        If True, calculate a pct change column
+    plot : Bool
+        If True, plot the bar plot of the cross sectional averages
+    t_test: Bool
+        If True, print the intervals that are significantlly different from zero based on t-test
+
     """
-    fig, ax = plt.subplots(figsize=(14,10))
-    handles, labels = ax.get_legend_handles_labels()
-    ax.plot(df_1['Date'], df_1[q],color='b', label='VIX')
-    ax.plot(df_2['Date'], df_2[q],color='g', label='VIX Futures')
-    ax.set_xlabel('Timestamp', fontsize=12)
-    
-    for event_dt in events:
-        event_line = ax.axvline(x=event_dt, color='red', linestyle='--', label=f'{event_dt} FOMC')
-        handles.append(event_line)
-        labels.append(f'FOMC {event_dt}')
-
-    ax.legend(handles, labels)
-    plt.show()
-
-
-
-
-
-
-
+    if price:
+        df['Price'] = (df['Close Bid Price'] + df['Close Ask Price']) / 2
+    if pct_change:
+        df['Change %'] = df.groupby(level='Event Datetime')['Price'].pct_change() * 100
+        df.dropna(inplace=True)
+    df_ca = df.groupby('Datetime Label')['Change %'].mean().reset_index()
+    if plot:
+        fig, ax = plt.subplots(figsize=(8,5))
+        ax.bar(df_ca['Datetime Label'], df_ca['Change %'],color='b')
+        ax.set_xlabel(f'{freq} to/from Event', fontsize=12)
+        ax.set_ylabel(f"% Change from previous {freq}", fontsize=12)
+        plt.show()
+    if t_test:
+        for i in df_ca['Datetime Label']:
+            result = scipy.stats.ttest_1samp(df[df['Datetime Label']==i]['Change %'],  0)
+            if result.pvalue < 0.05:
+                print(f"The Change % of T{i} is significant, degrees of freedom: {result.df}")
+    return df_ca
 
 
+def get_fedwatchprob(watch_date, num_upcoming):
+    """
+    Return the estimated fed watch probabilities given the watch_date and the number of up_coming
+    fomc meeting
+    Parameters
+    ----------
+    watch_date: datetime
+        The date to calculate the estimated fed watch proability on
+    num_upcoming: int 
+        The number of foward looking fed watch probaility to calculate
+    """
+    try: 
+        fedwatch = fw.fedwatch.FedWatch(watch_date = watch_date,
+                                        fomc_dates = FOMC_DATES,
+                                        num_upcoming = num_upcoming,
+                                        user_func = read_price_history,
+                                        path = BASE_URL_FEDFUT)
+        data = fedwatch.generate_hike_info(rate_cols=True)
+        data = data.reset_index()
+        return data 
+        # result = pd.concat([result, data]).fillna(0)
+    except Exception:
+        print(f"Issues with {watch_date}")
