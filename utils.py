@@ -17,7 +17,7 @@ palette = sns.color_palette("husl", 3)
 # For VIX Index, the data source is IAP.csv is a time series of VIX in CDT at 15 seconds intervals.
 # VIX index disseminated from 2:15am CDT to 3:15pm CDT with a 15min break between 8:15am to 8:30am
 
-# For VIX Futures contract files the data is in ET. 
+# For VIX Futures contract files the data is in ET at 5 minutes intervals.
 
 # For S&P 500 VIX Futures Historical Data.csv, each entry shows the prices of the VIX Future expiring 
 # that month of the entry date
@@ -105,7 +105,7 @@ def forward_roll_contract(event_dt, roll=1):
     return pd.read_csv(url)
 
 
-def get_range_multi(event_dt, roll, range_width, freq):
+def get_range_contract(event_dt, roll, bef, aft, freq):
     """
     Return a multi-indexed dataframe containing data of forward roll contract of event_dt, filtered as
     given by the range_width and freq 
@@ -128,21 +128,22 @@ def get_range_multi(event_dt, roll, range_width, freq):
         except Exception:
             continue 
         df["Datetime"] = pd.to_datetime(df["Date"] + " " + df["Time"], format="%m/%d/%Y %H:%M:%S.%f")
-        df = df.set_index('Datetime')
+        df.set_index('Datetime', inplace=True)
+        df.drop(['Date', 'Time'], axis = 1, inplace=True)
+        # Remove time not from 9:30 - 16:00
+        df = df.between_time('9:30', '16:00')
         df = df.resample(freq).first() 
-        # Remove time not from 9-4
-        df = df.between_time('9:00', '16:00')
         df.dropna(inplace=True)
         try: # If the rolling contract does not contain data for this event datetime. Eg: 2012/06/20
             event_row = df.index.get_loc(dt)
         except Exception:
             continue
-        start = event_row - range_width - 1 
-        end = event_row + range_width 
+        start = event_row - bef - 1 
+        end = event_row + aft 
         filt = df.iloc[start:end + 1, :].reset_index()
         filt['Event Datetime'] = dt
-        filt['Datetime Label'] = [-i for i in range(range_width + 1, 0, -1)] + [0] + \
-                                [i for i in range(1, range_width+1)]
+        filt['Datetime Label'] = [-i for i in range(bef + 1, 0, -1)] + [0] + \
+                                [i for i in range(1, aft+1)]
         filt = filt.set_index(['Event Datetime', 'Datetime'])
         result = pd.concat([result, filt])
     return result
@@ -177,6 +178,7 @@ def get_range(df, event_dt, bef, aft, freq=None):
         # The look through period might not contain as much data as we want
         if filt.shape[0] == 0:
             continue
+        # Create a datetime label column to the datetime of the event for each of the filtered rows 
         filt.set_index('Datetime', inplace=True)
         event_row_filt = filt.index.get_loc(date)
         bef_filt = event_row_filt - 1
@@ -256,7 +258,7 @@ def get_indiv_fomc(fomc_datetimes, vix, sp500, range, freq, roll):
             vix_.fillna(0, inplace=True)
             vix_['Cum. % Change'] = vix_.groupby('Event Datetime')['% Change'].cumsum()
 
-            vix_fut = get_range_multi(datetime, roll, range, freq)
+            vix_fut = get_range_contract(datetime, roll, range, freq)
             vix_fut['Price'] = (vix_fut['Close Bid Price'] + vix_fut['Close Ask Price']) / 2
             vix_fut = vix_fut[['Symbol', 'Open Time', 'Close Time', 'Price', 'Datetime Label']]
             vix_fut['Log Price'] = np.log(vix_fut['Price'])
@@ -280,6 +282,12 @@ def get_indiv_fomc(fomc_datetimes, vix, sp500, range, freq, roll):
 
 def plot_indiv_fomc(events):
     """
+    Return a figure containing plots of all the event in events
+
+    Parameters
+    ----------
+    events: list[list[DataFrame]]
+        A nested list of dataframes in the order of VIX, VIX futures, and SPX
     """
     rows = math.ceil(len(events) / 2)
     fig, axs = plt.subplots(rows, 2, figsize=(15, 4 * rows)) 
@@ -327,6 +335,8 @@ def get_fedwatchprob(watch_date, num_upcoming):
 
 def plot_cs_avg(df_list, title):
     """
+    Return a plot of the cross sectional averages of VIX, VIX Futures and SP500 cumilative log changes/returns
+    across each datatime label
     """
     fig, ax1 = plt.subplots(figsize=(8,5))
     handles, labels = ax1.get_legend_handles_labels()
@@ -347,35 +357,44 @@ def plot_cs_avg(df_list, title):
     plt.show()
 
 
-def get_cs_avg_new(vix_df, sp_df, event_dt, fomc_pc, roll, range, freq):
+def get_cs_avg_new(vix_df, sp_df, event_dt, fomc_pc, roll, bef, aft, freq, ca=False):
     """
+    Return a nested list of filteres vix, vix futures and spx data and their cross sectional averages of their cumilative 
+    changes / log returns for each of defined the datetime labels.
     """
-    vix_fut_filt = get_range_multi(event_dt, roll, range, freq)
+    
+    vix_fut_filt = get_range_contract(event_dt, roll, bef, aft, freq)
     vix_fut_filt['Price'] = (vix_fut_filt['Close Bid Price'] + vix_fut_filt['Close Ask Price']) / 2
     vix_fut_filt = vix_fut_filt[['Symbol', 'Open Time', 'Close Time', 'Price', 'Datetime Label']]
     vix_fut_filt['Log Price'] = np.log(vix_fut_filt['Price'])
     vix_fut_filt['Log Return %'] = vix_fut_filt.groupby('Event Datetime')['Log Price'].diff() * 100
     vix_fut_filt.fillna(0, inplace=True)
     vix_fut_filt['Cum. Log Return %'] = vix_fut_filt.groupby('Event Datetime')['Log Return %'].cumsum()
-    vix_fut_filt_ca = vix_fut_filt.groupby('Datetime Label')['Cum. Log Return %'].mean().reset_index()
 
-    vix_filt = get_range(vix_df, event_dt, range, range, freq)
-    vix_filt['% Change'] = vix_filt.groupby('Event Datetime')['Price'].pct_change() * 100
+    vix_filt = get_range(vix_df, event_dt, bef, aft, freq)
+    vix_filt['Log Price'] = np.log(vix_filt['Price'])
+    vix_filt['Log Change %'] = vix_filt.groupby('Event Datetime')['Log Price'].diff() * 100
     vix_filt.fillna(0, inplace=True)
-    vix_filt['Cum. % Change'] = vix_filt.groupby('Event Datetime')['% Change'].cumsum()
-    vix_filt = vix_filt.join(fomc_pc, how='left', on='Event Datetime')
-    vix_filt_ca = vix_filt.groupby('Datetime Label')['Cum. % Change'].mean().reset_index()
-    
-    sp500_filt = get_range(sp_df, event_dt, range, range, freq)
-    sp500_filt['Price'] = sp500_filt['Open']
-    sp500_filt['Log Price'] = np.log(sp500_filt['Price'])
-    sp500_filt['Log Return %'] = sp500_filt.groupby('Event Datetime')['Log Price'].diff() * 100
-    sp500_filt.fillna(0, inplace=True)
-    sp500_filt['Cum. Log Return %'] = sp500_filt.groupby('Event Datetime')['Log Return %'].cumsum()
-    sp500_filt_ca = sp500_filt.groupby('Datetime Label')['Cum. Log Return %'].mean().reset_index()
+    vix_filt['Cum. Change %'] = vix_filt.groupby('Event Datetime')['Log Change %'].cumsum()
+    vix_filt = vix_filt.join(fomc_pc, how='left', on='Event Datetime')  # Add PC indicator column
 
-    return [[vix_filt, vix_fut_filt, sp500_filt],
-            [vix_filt_ca, vix_fut_filt_ca, sp500_filt_ca]]
+    sp_filt = get_range(sp_df, event_dt, bef, aft, freq)
+    sp_filt['Price'] = sp_filt['Open']
+    sp_filt['Log Price'] = np.log(sp_filt['Price'])
+    sp_filt['Log Return %'] = sp_filt.groupby('Event Datetime')['Log Price'].diff() * 100
+    sp_filt.fillna(0, inplace=True)
+    sp_filt['Cum. Log Return %'] = sp_filt.groupby('Event Datetime')['Log Return %'].cumsum()
+
+    if ca:
+        vix_fut_filt_ca = vix_fut_filt.groupby('Datetime Label')['Cum. Log Return %'].mean().reset_index()
+        vix_filt_ca = vix_filt.groupby('Datetime Label')['Cum. % Change'].mean().reset_index()
+        sp_filt_ca = sp_filt.groupby('Datetime Label')['Cum. Log Return %'].mean().reset_index()
+        return [[vix_filt, vix_fut_filt, sp_filt],
+                [vix_filt_ca, vix_fut_filt_ca, sp_filt_ca]]
+    
+    else:
+        return [vix_filt, vix_fut_filt, sp_filt]
+
     
 
 def get_panel_bucket(df_list, start_label, end_label):
@@ -395,3 +414,10 @@ def get_panel_bucket(df_list, start_label, end_label):
     clusters = pd.concat([panel['c1'], panel['c2']], axis=1)
     return panel, clusters
  
+
+def cal_realized_vol(log_returns):
+    """
+    Return the realized volatility using the list like log_returns
+    """
+    realized_var = np.sum(log_returns ** 2)
+    return np.sqrt(realized_var)
